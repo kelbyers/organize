@@ -67,6 +67,8 @@ dev = [
     "pytest>=8.0.0,<9.0.0",
     "requests>=2.31.0,<3.0.0",
     "ruff>=0.3.0,<1.0.0",
+    "tox>=4.30.3",
+    "tox-uv>=1.28.1",
     "types-pyyaml>=6.0.12.10,<7.0.0",
 ]
 
@@ -75,6 +77,20 @@ source = ['organize']
 
 [tool.coverage.report]
 exclude_also = ["pragma: no cover", "if TYPE_CHECKING:"]
+
+[tool.tox]
+env_list = [{ prefix = "3.", start = 9, stop = 14 }]
+
+[tool.tox.env_run_base]
+runner = "uv-venv-lock-runner"
+commands = [
+    ["python", "main.py", "--version"],
+    ["pytest", { replace = "posargs", default = ["tests"], extend = true }],
+]
+
+[tool.tox.env.mypy]
+base_python = "3.9"
+commands = [["mypy", "."]]
 
 [tool.mypy]
 python_version = "3.9"
