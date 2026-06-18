@@ -18,6 +18,7 @@ def test_make_files(fs):
     make_files(files, "test")
     assert read_files("test") == files
 
+
 def test_make_files_from_list(fs):
     names = ["asd.txt", "newname 2.pdf", "newname.pdf", "test.pdf"]
     make_files(names, "test")

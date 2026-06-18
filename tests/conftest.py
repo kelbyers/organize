@@ -9,9 +9,9 @@ from organize.output import SavingOutput
 
 # define types for the make_files structure
 ## just the raw contents of a file
-FileContentsRaw = Union[str, bytes] 
+FileContentsRaw = Union[str, bytes]
 ## file contents plus a timestamp
-FileContentsTimeStamp = tuple["FileContentsRaw", float] 
+FileContentsTimeStamp = tuple["FileContentsRaw", float]
 ## when passing or returning files, use just the data, or can add timestamps
 FileContents = Union[FileContentsRaw, FileContentsTimeStamp]
 ## A FileSpec is a dictionary of:
@@ -45,7 +45,7 @@ def make_files(structure: Union[FileSpec, list[str]], path: Union[Path, str] = "
         "file.txt": "Hello world\nAnother line",
     }
 
-    Or, with timestamps, where the timstamps are POSIX file timestamps (see 
+    Or, with timestamps, where the timstamps are POSIX file timestamps (see
     os.utime); it is technically possible to only specify timestamps for some
     files and no timestamp for others, but the `read_files*()` function will
     include all timestamps or no timestamps:
@@ -77,7 +77,7 @@ def make_files(structure: Union[FileSpec, list[str]], path: Union[Path, str] = "
     for name, content in structure.items():
         resource: Path = path / name
 
-        timestamp : Union[float, None] = None
+        timestamp: Union[float, None] = None
 
         if isinstance(content, tuple):
             content, timestamp = content
@@ -95,12 +95,11 @@ def make_files(structure: Union[FileSpec, list[str]], path: Union[Path, str] = "
             resource.write_text(content)
         else:
             raise ValueError(f"Unknown file data {content}")
-        
+
         # if a timestamp was provided, set st_atime and st_mtime; we only care
         # about st_mtime, but utime requires both values
         if timestamp is not None:
             os.utime(resource, (timestamp, timestamp))
-
 
 
 def read_files(path: Union[Path, str] = ".", with_timestamp: bool = False):
