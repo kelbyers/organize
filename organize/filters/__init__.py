@@ -14,6 +14,7 @@ from .name import Name
 from .python import Python
 from .regex import Regex
 from .size import Size
+from .skip import Skip
 
 ALL = (
     Created,
@@ -32,4 +33,5 @@ ALL = (
     Python,
     Regex,
     Size,
+    Skip,
 )
