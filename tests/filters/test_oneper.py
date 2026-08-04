@@ -209,7 +209,9 @@ def make_files_with_relative_ts(
 
 @pytest.fixture
 def files_with_relative_ts(
-    fs, offsets: list[int], order: list[int] | None
+    fs: FakeFilesystem,
+    offsets: list[int],
+    order: list[int] | None,
 ) -> list[Path]:
     """fixture to create several files with timestamps
 
@@ -302,6 +304,43 @@ def may_need_real_files(
         if now.hour != later.hour:
             time.sleep(count)
         yield make_files_with_relative_ts(tmp_path, offsets, order, maker=make_tmp_path)
+
+
+def move_to_dirs(
+    paths: list[Path],
+    dirs: list[str],
+) -> tuple[list[Path], list[Path]]:
+    assert len(paths) == len(dirs), "number of dirs should match number of paths"
+    named_paths: list[Path] = []
+    dir_paths: set[Path] = set()
+    for i in range(len(dirs)):
+        # make sure to timestamp dir to be no younger than file
+        named = paths[i]
+        ts = named.stat().st_mtime
+
+        # make sure target dir exists
+        dir = Path(dirs[i])
+        dir_paths.add(dir)
+        if not dir.exists():
+            dir.mkdir()
+        else:
+            # dir already exists, we want its final timestamp
+            # to be the newest of its previous timestamp or
+            # the file we are going to move into it
+            dir_ts = dir.stat().st_mtime
+            if dir_ts < ts:
+                ts = dir_ts
+
+        new_name = dir / named.name
+        assert not new_name.exists()
+        named.rename(new_name)
+        # after moving the file, set the dir timestamp; we do this moving,
+        # because the move operation will change set it to the current time
+        os.utime(dir, (ts, ts))
+        named_paths.append(new_name)
+        assert not named.exists()
+        assert new_name.exists()
+    return named_paths, sorted(list(dir_paths))
 
 
 def rename_paths(paths: list[Path], names: list[str]) -> list[Path]:
@@ -485,7 +524,7 @@ def test_week_start_between_1_and_7():
 def check_selects_one_with_method(
     method: DetectionMethod,
     paths: list[Path],
-    acted: list[bool | int],
+    acted: list[bool | int | str],
 ):
     """test the OnePer::pipeline() for one set of files
 
@@ -498,12 +537,12 @@ def check_selects_one_with_method(
     :param acted: the expected results for each call of the pipeline; the call
             either return `False`, or it will return `True`, and the value of
             `res.path` will be set to a file which is specified by its index
-            in the `paths` param;
+            in the `paths` param OR by the path name;
             e.g., `acted=[False, 1, 2]` indicates: the first call returns
             `False`, the second call returns `True` with `res.path` set to
             `paths[1]`, and the third call returns `True` with `res.path` set
             to `paths[2]`
-    :type acted: list[bool | int]
+    :type acted: list[bool | int | str]
     """
     ## arrange
     # method, paths, expected = method_and_expect
@@ -519,7 +558,7 @@ def check_selects_one_with_method(
         r.append(res)
 
     ## assert
-    expected_one = paths[0]
+    expected_one: Path = paths[0]
     for i, act in enumerate(a):
         res = r[i]
         expected_act = acted[i]
@@ -533,13 +572,16 @@ def check_selects_one_with_method(
         if not expected_a:
             # value of res.path should equal the path the pipeline processed
             expected_res_path = paths[i]
+        elif isinstance(expected_act, str):
+            expected_res_path = Path(expected_act)
         else:
             # value of res.path should be updated with the previous `the_one`
             expected_res_path = paths[expected_act]
+
         assert expected_res_path == res.path
 
-        # the vars for our filter should be updated
-        if expected_act != i:
+        if expected_res_path != paths[i]:
+            # the vars for our filter should be updated
             expected_one = paths[i]
         assert expected_one == res.vars[op.filter_config.name]["the_one"]
 
@@ -551,7 +593,9 @@ def check_selects_one_with_method(
         ([1, 2, 0], None, [False, 1, 0]),
     ],
 )
-def test_detects_by_lastmodified(files_with_relative_ts, acted):
+def test_detects_by_lastmodified(
+    files_with_relative_ts: list[Path], acted: list[int | bool | str]
+):
     """test `OnePer::pipeline()` with the `lastmodified` method
 
     :param files_with_relative_ts: a test fixture that generates files with
@@ -563,13 +607,47 @@ def test_detects_by_lastmodified(files_with_relative_ts, acted):
 
 
 @pytest.mark.parametrize(
+    ["offsets", "order", "dirs", "acted"],
+    [
+        ## "a" is expected to be the alphabetical choice of these
+        # "b" - oldest file, "c" - youngest file; seen: a, b, c
+        ([2, 1, 0], None, ["/c", "/a", "/b"], [False, "/a", "/c"]),
+        # "a" - oldest, "c" - youngest; seen: a, b, c
+        ([0, 1, 2], None, ["/a", "/b", "/c"], [False, "/b", "/c"]),
+        # "c" - oldest, "a" - youngest; seen: a, b, c
+        ([0, 1, 2], None, ["/c", "/b", "/a"], [False, "/a", "/b"]),
+    ],
+)
+def test_can_filter_dirs(
+    files_with_relative_ts: list[Path],
+    dirs: list[str],
+    acted: list[bool | int | str],
+):
+    """test `OnePer::pipeline()` with directories instead of files
+
+    :param files_with_relative_ts: a test fixture that generates files with
+        relative modification timestamps, and optionally in a specified order of
+        file creation
+    :param dirs: directories to use; each file in `files_with_relative_ts` will
+        be moved into these directories, in order; e.g.
+        `files_with_relative_ts[0]` -> `dirs[0]`, etc.
+    :param acted: the expected results (see `check_selects_one_with_method`)
+    """
+    moved, dir_paths = move_to_dirs(files_with_relative_ts, dirs)
+    check_selects_one_with_method("lastmodified", dir_paths, acted)
+
+
+@pytest.mark.parametrize(
     ["offsets", "order", "acted"],
     [
         ([0, 2, 1], None, [False, 0, 2]),
         ([0, 1, 2], None, [False, 0, 1]),
     ],
 )
-def test_reverses_lastmodified(files_with_relative_ts, acted):
+def test_reverses_lastmodified(
+    files_with_relative_ts: list[Path],
+    acted: list[int | bool | str],
+):
     """test `OnePer::pipeline()` with the `lastmodified` method, reversed
 
     :param files_with_relative_ts: a test fixture that generates files with
@@ -587,7 +665,10 @@ def test_reverses_lastmodified(files_with_relative_ts, acted):
         ([5, 5, 5], [1, 0, 2], [False, 0, 2]),
     ],
 )
-def test_detects_by_created(may_need_real_files, acted):
+def test_detects_by_created(
+    may_need_real_files: list[Path],
+    acted: list[int | bool | str],
+):
     """test `OnePer::pipeline()` with the `created` method
 
     This test uses different orders of file creation to alter which files
@@ -608,7 +689,10 @@ def test_detects_by_created(may_need_real_files, acted):
         ([5, 5, 5], [0, 2, 1], [False, 0, 2]),
     ],
 )
-def test_reverses_created(may_need_real_files, acted):
+def test_reverses_created(
+    may_need_real_files: list[Path],
+    acted: list[int | bool | str],
+):
     """test `OnePer::pipeline()` with the `created` method, reversed
 
     This test uses different orders of file creation to alter which files
@@ -634,7 +718,7 @@ def test_reverses_created(may_need_real_files, acted):
 )
 def test_detects_by_first_seen(
     files_with_relative_ts: list[Path],
-    acted: list[int | bool],
+    acted: list[int | bool | str],
     seen: list[int],
 ):
     """test `OnePer::pipeline()` with the `first seen` method
@@ -668,7 +752,7 @@ def test_detects_by_first_seen(
 )
 def test_reverse_first_seen(
     files_with_relative_ts: list[Path],
-    acted: list[bool | int],
+    acted: list[int | bool | str],
     seen: list[int],
 ):
     """test `OnePer::pipeline()` with the `first seen` method, reversed
@@ -703,7 +787,7 @@ def test_reverse_first_seen(
 )
 def test_detects_by_name(
     files_with_relative_ts: list[Path],
-    acted: list[bool | int],
+    acted: list[int | bool | str],
     names: list[str],
 ):
     """test `OnePer::pipeline()` with the `name` method
@@ -740,7 +824,7 @@ def test_detects_by_name(
 )
 def test_reverses_name(
     files_with_relative_ts: list[Path],
-    acted: list[bool | int],
+    acted: list[bool | int | str],
     names: list[str],
 ):
     """test `OnePer::pipeline()` with the `name` method, reversed
