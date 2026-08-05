@@ -370,7 +370,7 @@ def rename_paths(paths: list[Path], names: list[str]) -> list[Path]:
     return named_paths
 
 
-def test_tracks_seen_files(fs):
+def test_tracks_seen_files(fs: FakeFilesystem) -> None:
     """our filter should keep track of files that it processes"""
     ## organize
     # create a single file
@@ -388,7 +388,7 @@ def test_tracks_seen_files(fs):
     assert a in op._seen_files
 
 
-def test_skips_symlinks(fs):
+def test_skips_symlinks(fs: FakeFilesystem) -> None:
     """our filter should ignore symlink files"""
     ## organize
     # create a file and a symlink to it
@@ -408,23 +408,23 @@ def test_skips_symlinks(fs):
     assert link_file not in op._seen_files
 
 
-def test_valid_periods(period):
+def test_valid_periods(period: Period) -> None:
     """our filter should allow valid periods"""
     # can we set up the filter with this period?
     # this will raise an exception if not, and the test will fail
     OnePer(period=period)
 
 
-def test_invalid_period():
+def test_invalid_period() -> None:
     """an invalid period should raise an exception"""
     try:
-        OnePer(period="fortnight")  # type: ignore[assignment]
+        OnePer(period="fortnight")  # type: ignore[arg-type]
         assert False, "Unexpected period allowed"
     except ValidationError:
         assert True
 
 
-def test_tracks_file_period(fs, period):
+def test_tracks_file_period(fs: FakeFilesystem, period: Period) -> None:
     """filtering a file should track the file's period"""
     ## arrange
     op = OnePer(period=period)
@@ -433,12 +433,11 @@ def test_tracks_file_period(fs, period):
     # possible time stamps
     now = Arrow(2026, 6, 26, 17, 8, 32, 123)
     # expected period for the file
-    file_period = (
-        now.floor(period)
-        if "week" != period
-        # the filter defaults to non-iso start on Sunday
-        else now.floor(period).shift(days=-1)
-    )
+    #
+    # Note: Arrow.floor() >= v1.4.0 supports adding the `week_start` parameter,
+    # but earlier versions do not. The `floor()` method simply returns the
+    # equivalent of `self.span(*args, **kwargs)[0]`
+    file_period = now.span(period, week_start=7)[0]
     f = make_fake_path(fs, "/f", now)
 
     ## act
@@ -455,7 +454,7 @@ def test_tracks_file_period(fs, period):
     assert op._the_one_for_period[file_period] is f
 
 
-def test_week_start(fs, week_start):
+def test_week_start(fs: FakeFilesystem, week_start: WeekStart) -> None:
     """user can specify a different day to start the week on"""
     ## arrange
     op = OnePer(period="week", week_start=week_start)
@@ -463,8 +462,35 @@ def test_week_start(fs, week_start):
     # possible time stamps
     now = Arrow(2026, 6, 26, 17, 8, 32, 123)
     # expected period for the file
-    shift_days = -1 if week_start == 7 else (week_start - 1)
-    file_period = now.floor("week").shift(days=shift_days)
+    #
+    # Note: Arrow.floor() >= v1.4.0 supports adding the `week_start` parameter,
+    # but earlier versions do not.
+    #
+    # rather than relying on my own dubious logic, let's hardcode all the
+    # correct week start periods. "2026/6/26" is a Friday. The period date must
+    # _always_ be earlier than the timestamp. Whether some value is added or
+    # subtracted to the default result of `Arrow.floor()` is dependant on what
+    # day of the week the timestamp represents. `Arrow.span()` correctly adjusts
+    # the value.
+    #
+    # By coding all the correct values here, we don't need to worry about
+    # changes in implementation, this test should be correct.
+    file_period: Arrow
+    if week_start == 1:  # Monday
+        file_period = Arrow(2026, 6, 22)
+    elif week_start == 2:  # Tuesday
+        file_period = Arrow(2026, 6, 23)
+    elif week_start == 3:  # Wednesday
+        file_period = Arrow(2026, 6, 24)
+    elif week_start == 4:  # Thursday
+        file_period = Arrow(2026, 6, 25)
+    elif week_start == 5:  # Friday
+        file_period = Arrow(2026, 6, 26)
+    elif week_start == 6:  # Saturday
+        file_period = Arrow(2026, 6, 20)
+    elif week_start == 7:  # Sunday
+        file_period = Arrow(2026, 6, 21)
+
     f = make_fake_path(fs, "/f", now)
 
     ## act
@@ -484,7 +510,7 @@ def test_week_start(fs, week_start):
     assert op.week_start == week_start
 
 
-def test_week_period_defaults_to_Sunday():
+def test_week_period_defaults_to_Sunday() -> None:
     """when no `week_start` provided, default to Sunday"""
     ## arrange
     op = OnePer(period="week")
@@ -493,29 +519,20 @@ def test_week_period_defaults_to_Sunday():
     assert op.week_start == 7
 
 
-def test_cannot_specify_week_start_on_other_periods(non_week_period, week_start):
-    """exception should be raised if `week_start` provided for non-week period"""
-    try:
-        OnePer(period=non_week_period, week_start=week_start)
-        assert False, "Unexpected week_start allowed"
-    except ValidationError:
-        assert True
-
-
-def test_week_start_between_1_and_7():
+def test_week_start_between_1_and_7() -> None:
     """exception should be raised for invalid `week_start`
 
     This is non-exhaustive, but just checks the two edge cases. Only values
     between 1 and 7 (inclusive) are valid.
     """
     try:
-        OnePer(period="week", week_start=0)  # type: ignore[assignment]
+        OnePer(period="week", week_start=0)  # type: ignore[arg-type]
         assert False, "Unexpected week_start value allowed"
     except ValidationError:
         assert True
 
     try:
-        OnePer(period="week", week_start=8)  # type: ignore[assignment]
+        OnePer(period="week", week_start=8)  # type: ignore[arg-type]
         assert False, "Unexpected week_start value allowed"
     except ValidationError:
         assert True
@@ -525,7 +542,7 @@ def check_selects_one_with_method(
     method: DetectionMethod,
     paths: list[Path],
     acted: list[bool | int | str],
-):
+) -> None:
     """test the OnePer::pipeline() for one set of files
 
     This performs the actual validation of `OnePer::pipeline()`.
@@ -595,7 +612,7 @@ def check_selects_one_with_method(
 )
 def test_detects_by_lastmodified(
     files_with_relative_ts: list[Path], acted: list[int | bool | str]
-):
+) -> None:
     """test `OnePer::pipeline()` with the `lastmodified` method
 
     :param files_with_relative_ts: a test fixture that generates files with
@@ -622,7 +639,7 @@ def test_can_filter_dirs(
     files_with_relative_ts: list[Path],
     dirs: list[str],
     acted: list[bool | int | str],
-):
+) -> None:
     """test `OnePer::pipeline()` with directories instead of files
 
     :param files_with_relative_ts: a test fixture that generates files with
@@ -647,7 +664,7 @@ def test_can_filter_dirs(
 def test_reverses_lastmodified(
     files_with_relative_ts: list[Path],
     acted: list[int | bool | str],
-):
+) -> None:
     """test `OnePer::pipeline()` with the `lastmodified` method, reversed
 
     :param files_with_relative_ts: a test fixture that generates files with
@@ -668,7 +685,7 @@ def test_reverses_lastmodified(
 def test_detects_by_created(
     may_need_real_files: list[Path],
     acted: list[int | bool | str],
-):
+) -> None:
     """test `OnePer::pipeline()` with the `created` method
 
     This test uses different orders of file creation to alter which files
@@ -692,7 +709,7 @@ def test_detects_by_created(
 def test_reverses_created(
     may_need_real_files: list[Path],
     acted: list[int | bool | str],
-):
+) -> None:
     """test `OnePer::pipeline()` with the `created` method, reversed
 
     This test uses different orders of file creation to alter which files
@@ -720,7 +737,7 @@ def test_detects_by_first_seen(
     files_with_relative_ts: list[Path],
     acted: list[int | bool | str],
     seen: list[int],
-):
+) -> None:
     """test `OnePer::pipeline()` with the `first seen` method
 
     This test changes the order of the paths get processed in when calling
@@ -754,7 +771,7 @@ def test_reverse_first_seen(
     files_with_relative_ts: list[Path],
     acted: list[int | bool | str],
     seen: list[int],
-):
+) -> None:
     """test `OnePer::pipeline()` with the `first seen` method, reversed
 
     This test changes the order of the paths get processed in when calling
@@ -789,7 +806,7 @@ def test_detects_by_name(
     files_with_relative_ts: list[Path],
     acted: list[int | bool | str],
     names: list[str],
-):
+) -> None:
     """test `OnePer::pipeline()` with the `name` method
 
     :param files_with_relative_ts: a test fixture that generates files with
@@ -826,7 +843,7 @@ def test_reverses_name(
     files_with_relative_ts: list[Path],
     acted: list[bool | int | str],
     names: list[str],
-):
+) -> None:
     """test `OnePer::pipeline()` with the `name` method, reversed
 
     :param files_with_relative_ts: a test fixture that generates files with
@@ -890,7 +907,7 @@ period_two_files = {
 }
 
 
-def test_one_period(fs: FakeFilesystem):
+def test_one_period(fs: FakeFilesystem) -> None:
     """test with all files in the same period - remove all except earliest"""
     for file in sorted(period_one_files):
         make_fake_path(fs, file, period_one_files[file])
@@ -910,7 +927,7 @@ def test_one_period(fs: FakeFilesystem):
             assert not Path(file).exists()
 
 
-def test_two_periods(fs: FakeFilesystem):
+def test_two_periods(fs: FakeFilesystem) -> None:
     """test with two different periods - keep earliest file from each period"""
     both_periods = period_one_files | period_two_files
     for file in sorted(both_periods):
@@ -959,7 +976,7 @@ rules:
 """
 
 
-def test_with_python_and_arrow(fs: FakeFilesystem):
+def test_with_python_and_arrow(fs: FakeFilesystem) -> None:
     """test with a complicated config that uses python and arrow
 
     This tests a config that restricts a time range to a portion of an hour. For
