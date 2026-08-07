@@ -537,6 +537,26 @@ def test_week_start_between_1_and_7() -> None:
         assert True
 
 
+def test_reuses_lastmodified_filter(fs: FakeFilesystem) -> None:
+    # arrange
+    actual_file_ts = Arrow(2025, 6, 7, 8, 9, 10, 11)
+    previous_filter_ts = Arrow(2026, 7, 8, 9, 10, 11, 12)
+    expected_period = previous_filter_ts.floor("hour")
+    path = make_fake_path(fs, "/a", actual_file_ts)
+    res = Resource(path=path, vars={"lastmodified": previous_filter_ts.datetime})
+    op = OnePer(period="hour", detect_the_one_by="lastmodified")
+
+    # act
+    op.pipeline(res, Output())
+
+    ## assert
+    # the period for the file should be known
+    assert expected_period in op._the_one_for_period
+
+    # with only one file, it should be the one for its period
+    assert op._the_one_for_period[expected_period] is path
+
+
 def check_selects_one_with_method(
     method: DetectionMethod,
     paths: list[Path],

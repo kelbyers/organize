@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import ClassVar, Literal, Any
 from typing import cast as type_cast
 
 from arrow import Arrow
@@ -187,7 +187,7 @@ class OnePer:
         # `week_start` for non-week time frames, so it is safe to always use it.
         return ts.span(self.period, count=1, week_start=self.week_start)[0]
 
-    def get_period(self, file: Path) -> tuple[Arrow, Arrow]:
+    def get_period(self, file: Path, vars: dict[str, Any]) -> tuple[Arrow, Arrow]:
         """get the timestamp for the file and the period for the timestamp
 
         A period is the earliest possible timestamp for grouping files that are
@@ -209,7 +209,13 @@ class OnePer:
             ts = arrow_get(read_created(file))
         else:
             # for all other detection methods, use the file modification time
-            ts = arrow_get(read_lastmodified(file))
+            lastmodified = vars.get("lastmodified")
+            if lastmodified is not None:
+                # re-use 'lastmodified' from the 'lastmodified' filter
+                ts = arrow_get(lastmodified)
+            else:
+                # no value from filter, get the file metadata
+                ts = arrow_get(read_lastmodified(file))
         # period for `path`
         period = self.get_timestamp_floor(ts)
 
@@ -287,7 +293,7 @@ class OnePer:
         self._seen_files.add(res.path)
 
         # get the period for this file
-        period, ts = self.get_period(res.path)
+        period, ts = self.get_period(res.path, res.vars)
 
         # get the_one, if this is the first file in period, it is the_one
         the_one = self._the_one_for_period.get(period, res.path)
