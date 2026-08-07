@@ -68,7 +68,6 @@ def make_fake_path(
     file: str,
     mtime: Arrow | None = None,
     ctime: Arrow | None = None,
-    _last: bool = False,
 ) -> Path:
     """create a fake file with optional timestamps
 
@@ -169,7 +168,7 @@ def make_files_with_relative_ts(
     offsets: list[int],
     order: list[int] | None,
     maker: Callable[
-        [FakeOrTmpFileSystem, str, Arrow | None, Arrow | None, bool],
+        [FakeOrTmpFileSystem, str, Arrow | None, Arrow | None],
         Path,
     ] = make_fake_path,
 ) -> list[Path]:
@@ -203,7 +202,7 @@ def make_files_with_relative_ts(
             # provide one anyway. This lets us enforce the correct order of file
             # creation when testing on MacOS.
             ctime = now.shift(hours=-1, seconds=i)
-        paths.append(maker(my_fs, f"/file_{i}", mtime, ctime, (idx + 1) >= count))
+        paths.append(maker(my_fs, f"/file_{i}", mtime, ctime))
     return sorted(paths)
 
 
