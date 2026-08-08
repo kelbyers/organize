@@ -1,5 +1,8 @@
+from __future__ import annotations
+
+from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Literal, Any
+from typing import Callable, ClassVar, Literal
 from typing import cast as type_cast
 
 from arrow import Arrow
@@ -187,7 +190,32 @@ class OnePer:
         # `week_start` for non-week time frames, so it is safe to always use it.
         return ts.span(self.period, count=1, week_start=self.week_start)[0]
 
-    def get_period(self, file: Path, vars: dict[str, Any]) -> tuple[Arrow, Arrow]:
+    def get_or_reuse_timestamp(
+        self,
+        file: Path,
+        func: Callable[[Path], datetime],
+        timestamp: datetime | None,
+    ) -> Arrow:
+        """Get the timestamp for the file
+
+        If a previous filter has already gotten the timestamp, we can reuse it.
+        Otherwise, we need to call the function that reads the file metadata.
+
+        :param file: the `Path` to the current file
+        :param func: the function that reads the metadata (e.g. `read_created`
+            or `read_lastmodified`)
+        :param timestamp: the timestamp provided in the `Resource::vars` by a
+            prior filter, or None if not present
+        :return: the timestamp
+        :rtype: Arrow
+        """
+        if timestamp is None:
+            # no timestamp available from previous filter, read from file
+            # metadata
+            timestamp = func(file)
+        return arrow_get(timestamp)
+
+    def get_period(self, res: Resource) -> tuple[Arrow, Arrow]:
         """get the timestamp for the file and the period for the timestamp
 
         A period is the earliest possible timestamp for grouping files that are
@@ -198,25 +226,47 @@ class OnePer:
         return it here so that we don't have to get it again if we need to use
         it.
 
-        :param file: the path to the file whose period we want
-        :type file: Path
+        :param res: the `Resource` for the current file, with the `path` and
+            `vars`, where the `vars` may include timestamps from other filters
+        :type file: Resource
 
         :return: a tuple with (period, timestamp)
-        :rtype: tuple
+        :rtype: tuple[Arrow, Arrow]
         """
+        # we've already done this, but pylance/mypy doesn't know this isn't
+        # called anywhere else; this lets us use the path in any function or
+        # method that requires a 'Path'
+        assert res.path is not None
+
+        # the path to the current file
+        file = res.path
+        # the vars from previous filters
+        vars = res.vars
+
+        # select which timestamp to get: created or lastmodified
+        timestamp_func: Callable[[Path], datetime]
+        timestamp_key: str
         if self._detect_the_one_by == "created":
-            # if detection method is file creation time, use that as timestamp
-            ts = arrow_get(read_created(file))
+            ## if detection method is file creation time, use that as timestamp
+            # function to read the file create timestamp
+            timestamp_func = read_created
+            # key in 'vars' for the timestamp
+            timestamp_key = "created"
         else:
-            # for all other detection methods, use the file modification time
-            lastmodified = vars.get("lastmodified")
-            if lastmodified is not None:
-                # re-use 'lastmodified' from the 'lastmodified' filter
-                ts = arrow_get(lastmodified)
-            else:
-                # no value from filter, get the file metadata
-                ts = arrow_get(read_lastmodified(file))
-        # period for `path`
+            ## for all other detection methods, use the file modification time
+            # function to read lastmodified timestamp
+            timestamp_func = read_lastmodified
+            # key in 'vars' for the timestamp
+            timestamp_key = "lastmodified"
+
+        # get the timestamp
+        ts = self.get_or_reuse_timestamp(
+            file,
+            timestamp_func,
+            vars.get(timestamp_key),
+        )
+
+        # get the period for the timestamp
         period = self.get_timestamp_floor(ts)
 
         return period, ts
@@ -293,7 +343,7 @@ class OnePer:
         self._seen_files.add(res.path)
 
         # get the period for this file
-        period, ts = self.get_period(res.path, res.vars)
+        period, ts = self.get_period(res)
 
         # get the_one, if this is the first file in period, it is the_one
         the_one = self._the_one_for_period.get(period, res.path)

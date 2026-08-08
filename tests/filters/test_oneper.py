@@ -302,7 +302,12 @@ def may_need_real_files(
         later = now.shift(seconds=count)
         if now.hour != later.hour:
             time.sleep(count)
-        yield make_files_with_relative_ts(tmp_path, offsets, order, maker=make_tmp_path)
+        yield make_files_with_relative_ts(
+            tmp_path,
+            offsets,
+            order,
+            maker=make_tmp_path,
+        )
 
 
 def move_to_dirs(
@@ -538,7 +543,7 @@ def test_week_start_between_1_and_7() -> None:
 
 
 def test_reuses_lastmodified_filter(fs: FakeFilesystem) -> None:
-    # arrange
+    ## arrange
     actual_file_ts = Arrow(2025, 6, 7, 8, 9, 10, 11)
     previous_filter_ts = Arrow(2026, 7, 8, 9, 10, 11, 12)
     expected_period = previous_filter_ts.floor("hour")
@@ -546,7 +551,27 @@ def test_reuses_lastmodified_filter(fs: FakeFilesystem) -> None:
     res = Resource(path=path, vars={"lastmodified": previous_filter_ts.datetime})
     op = OnePer(period="hour", detect_the_one_by="lastmodified")
 
-    # act
+    ## act
+    op.pipeline(res, Output())
+
+    ## assert
+    # the period for the file should be known
+    assert expected_period in op._the_one_for_period
+
+    # with only one file, it should be the one for its period
+    assert op._the_one_for_period[expected_period] is path
+
+
+@pytest.mark.parametrize(["offsets", "order"], [([0], None)])
+def test_reuses_created_filter(may_need_real_files) -> None:
+    ## arrange
+    previous_filter_ts = Arrow(2026, 7, 8, 9, 10, 11, 12)
+    expected_period = previous_filter_ts.floor("hour")
+    path = may_need_real_files[0]
+    res = Resource(path=path, vars={"created": previous_filter_ts.datetime})
+    op = OnePer(period="hour", detect_the_one_by="created")
+
+    ## act
     op.pipeline(res, Output())
 
     ## assert
